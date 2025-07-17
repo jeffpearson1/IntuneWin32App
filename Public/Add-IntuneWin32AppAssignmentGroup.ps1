@@ -49,16 +49,21 @@ function Add-IntuneWin32AppAssignmentGroup {
         Specify a count in minutes for snoozing the restart notification, if not specified the snooze functionality is now allowed.
 
     .PARAMETER FilterName
-        Specify the name of an existing Filter.
+        Specify the name of an existing Filter. Cannot be used with FilterID.
+
+    .PARAMETER FilterID
+    Specify the ID of an existing Filter. Cannot be used with FilterName.
 
     .PARAMETER FilterMode
         Specify the filter mode of the specified Filter, e.g. Include or Exclude.
+
+
 
     .NOTES
         Author:      Nickolaj Andersen
         Contact:     @NickolajA
         Created:     2020-09-20
-        Updated:     2025-07-01
+        Updated:     2025-07-17
 
         Version history:
         1.0.0 - (2020-09-20) Function created
@@ -68,6 +73,7 @@ function Add-IntuneWin32AppAssignmentGroup {
         1.0.4 - (2023-09-04) Updated with Test-AccessToken function
         1.0.5 - (2023-09-20) Updated with FilterName and FilterMode parameters
         1.0.6 - (2025-07-01) Fixed issue requiring an available time in the past
+        1.0.7 - (2025-07-17) Added support for FilterID to be directly passed on the command line
     #>
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -138,13 +144,17 @@ function Add-IntuneWin32AppAssignmentGroup {
         [ValidateNotNullOrEmpty()]
         [string]$FilterName,
 
+        [parameter(Mandatory = $false, ParameterSetName = "GroupInclude", HelpMessage = "Specify the ID of an existing Filter.")]
+        [ValidateNotNullOrEmpty()]
+        [string]$FilterID,
+
         [parameter(Mandatory = $false, ParameterSetName = "GroupInclude", HelpMessage = "Specify the filter mode of the specified Filter, e.g. Include or Exclude.")]
         [ValidateSet("Include", "Exclude")]
         [string]$FilterMode
     )
     Begin {
         # Ensure required authentication header variable exists
-        if ($Global:AuthenticationHeader -eq $null) {
+        if ($null -eq $Global:AuthenticationHeader) {
             Write-Warning -Message "Authentication token was not found, use Connect-MSIntuneGraph before using this function"; break
         }
         else {
@@ -184,18 +194,39 @@ function Add-IntuneWin32AppAssignmentGroup {
 
         # Output warning message that additional required parameters for filter assignment configuration is required
         if ($PSBoundParameters["FilterMode"]) {
-            if (-not($PSBoundParameters["FilterName"])) {
-                Write-Warning -Message "FilterMode parameter was specified but required parameter FilterName was not, please specify a Filter name to use for this assignment"
+            if ((-not($PSBoundParameters["FilterName"])) -and (-not($PSBoundParameters["FilterID"]))) {
+                Write-Warning -Message "FilterMode parameter was specified but required parameter FilterName or FilterID was not, please specify a Filter name or ID to use for this assignment"
             }
         }
 
-        # Output verbose message that default value for FilterMode will be used if FilterName is passed on the command line, but FilterMode is not
+
         if ($PSBoundParameters["FilterName"]) {
-            if (-not($PSBoundParameters["FilterMode"])) {
+            # Output warning message that FilterName and FilterID parameters cannot be used together
+            if ($PSBoundParameters["FilterID"]) {
+                Write-Warning -Message "FilterName and FilterID parameters cannot be used together, please specify only one of the two parameters"
+                break
+            }
+            # Output verbose message that default value for FilterMode will be used if FilterName is passed on the command line, but FilterMode is not
+            if ((-not($PSBoundParameters["FilterMode"])) -and (-not($PSBoundParameters["FilterID"]))) {
                 Write-Verbose -Message "FilterMode parameter was not specified, using default value of: Include"
                 $FilterMode = "Include"
             }
         }
+
+
+        if ($PSBoundParameters["FilterID"]) {
+            # Output warning message that FilterName and FilterID parameters cannot be used together
+            if ($PSBoundParameters["FilterName"]) {
+                Write-Warning -Message "FilterName and FilterID parameters cannot be used together, please specify only one of the two parameters"
+                break
+            }
+            # Output verbose message that default value for FilterMode will be used if FilterID is passed on the command line, but FilterMode is not
+            if ((-not($PSBoundParameters["FilterMode"])) -and (-not($PSBoundParameters["FilterName"]))) {
+                Write-Verbose -Message "FilterMode parameter was not specified, using default value of: Include"
+                $FilterMode = "Include"
+            }
+        }
+
     }
     Process {
         # Get Filter object if parameter is passed on command line
@@ -206,9 +237,9 @@ function Add-IntuneWin32AppAssignmentGroup {
             # Ensure a Filter exist by given name from parameter input
             Write-Verbose -Message "Querying for specified Filter: $($FilterName)"
             $AssignmentFilters = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceManagement/assignmentFilters" -Verbose
-            if ($AssignmentFilters -ne $null) {
+            if ($null -ne $AssignmentFilters) {
                 $AssignmentFilter = $AssignmentFilters | Where-Object { $PSItem.displayName -eq $FilterName }
-                if ($AssignmentFilter -ne $null) {
+                if ($null -ne $AssignmentFilter) {
                     Write-Verbose -Message "Found Filter with display name '$($AssignmentFilter.displayName)' and id: $($AssignmentFilter.id)"
                 }
                 else {
@@ -216,11 +247,29 @@ function Add-IntuneWin32AppAssignmentGroup {
                 }
             }
         }
+        
+        if ($PSBoundParameters["FilterID"]) {
+            # Ensure Filter mode is lowercase
+            $FilterMode = $FilterMode.ToLower()
+
+            # Ensure a Filter exists with the ID from parameter input
+            Write-Verbose -Message "Querying for specified Filter with ID: $($FilterID)"
+            $AssignmentFilters = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceManagement/assignmentFilters" -Verbose
+            if ($null -ne $AssignmentFilters) {
+                $AssignmentFilter = $AssignmentFilters | Where-Object { $PSItem.id -eq $FilterID }
+                if ($null -ne $AssignmentFilter) {
+                    Write-Verbose -Message "Found Filter with display name '$($AssignmentFilter.displayName)' and id: $($AssignmentFilter.id)"
+                }
+                else {
+                    Write-Warning -Message "Could not find Filter with ID: '$($FilterID)'"
+                }
+            }
+        }
 
         # Retrieve Win32 app by ID from parameter input
         Write-Verbose -Message "Querying for Win32 app using ID: $($ID)"
         $Win32App = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($ID)" -Method "GET"
-        if ($Win32App -ne $null) {
+        if ($null -ne $Win32App) {
             $Win32AppID = $Win32App.id
 
             # Construct target assignment body
@@ -234,8 +283,8 @@ function Add-IntuneWin32AppAssignmentGroup {
             }
             $TargetAssignment = @{
                 "@odata.type" = $DataType
-                "deviceAndAppManagementAssignmentFilterId" = if ($AssignmentFilter -ne $null) { $AssignmentFilter.id } else { $null }
-                "deviceAndAppManagementAssignmentFilterType" = if ($AssignmentFilter -ne $null) { $FilterMode } else { "none" }
+                "deviceAndAppManagementAssignmentFilterId" = if ($null -ne $AssignmentFilter) { $AssignmentFilter.id } else { $null }
+                "deviceAndAppManagementAssignmentFilterType" = if ($null -ne $AssignmentFilter) { $FilterMode } else { "none" }
                 "groupId" = $GroupID
             }
 
