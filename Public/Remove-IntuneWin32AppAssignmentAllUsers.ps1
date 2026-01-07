@@ -1,10 +1,12 @@
-function Remove-IntuneWin32AppAssignment {
+function Remove-IntuneWin32AppAssignmentAllUsers {
     <#
     .SYNOPSIS
-        Remove all assignments for a Win32 app.
+        Remove an 'All Users' assignment from a Win32 app.
 
     .DESCRIPTION
-        Remove all assignments for a Win32 app.
+        Remove an 'All Users' assignment from a Win32 app. This will remove the 'All Users' assignment 
+        regardless of the intent (required, available, or uninstall). Since 'All Users' can only be 
+        assigned once across all intents, this function will find and remove whichever intent is currently configured.
 
     .PARAMETER DisplayName
         Specify the display name for a Win32 application.
@@ -15,14 +17,11 @@ function Remove-IntuneWin32AppAssignment {
     .NOTES
         Author:      Nickolaj Andersen
         Contact:     @NickolajA
-        Created:     2020-04-29
-        Updated:     2023-09-04
+        Created:     2025-12-07
+        Updated:     2025-12-07
 
         Version history:
-        1.0.0 - (2020-04-29) Function created
-        1.0.1 - (2021-04-01) Updated token expired message to a warning instead of verbose output
-        1.0.2 - (2021-08-31) Updated to use new authentication header
-        1.0.3 - (2023-09-04) Updated with Test-AccessToken function
+        1.0.0 - (2025-12-07) Function created
     #>
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -82,27 +81,34 @@ function Remove-IntuneWin32AppAssignment {
                 # Attempt to call Graph and retrieve all assignments for Win32 app
                 $Win32AppAssignmentResponse = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32AppID)/assignments" -ErrorAction Stop
                 if ($Win32AppAssignmentResponse -ne $null -and $Win32AppAssignmentResponse.Count -gt 0) {
-                    Write-Verbose -Message "Count of assignments for Win32 app before attempted removal process: $(($Win32AppAssignmentResponse | Measure-Object).Count)"
-
-                    # Process each assignment for removal
-                    foreach ($Win32AppAssignment in $Win32AppAssignmentResponse) {
-                        Write-Verbose -Message "Attempting to remove Win32 app assignment with ID: $($Win32AppAssignment.id)"
+                    # Filter for 'All Users' assignments only
+                    $AllUsersAssignments = $Win32AppAssignmentResponse | Where-Object { $_.target.'@odata.type' -eq "#microsoft.graph.allLicensedUsersAssignmentTarget" }
+                    
+                    if ($AllUsersAssignments.Count -gt 0) {
+                        Write-Verbose -Message "Found $($AllUsersAssignments.Count) 'All Users' assignment(s) for removal"
                         
-                        try {
-                            # Remove current assignment
-                            $Win32AppAssignmentRemoveResponse = Invoke-MSGraphOperation -Delete -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32AppID)/assignments/$($Win32AppAssignment.id)" -ErrorAction Stop
-                        }
-                        catch [System.Exception] {
-                            Write-Warning -Message "An error occurred while retrieving Win32 app assignments for app with ID: $($Win32AppID). Error message: $($_.Exception.Message)"
+                        # Process each 'All Users' assignment for removal
+                        foreach ($Assignment in $AllUsersAssignments) {
+                            # Determine the intent of the assignment for informative output
+                            $AssignmentIntent = $Assignment.intent
+                            Write-Verbose -Message "Attempting to remove 'All Users' assignment with intent '$($AssignmentIntent)' and ID: $($Assignment.id)"
+                            
+                            try {
+                                # Remove current 'All Users' assignment
+                                $Win32AppAssignmentRemoveResponse = Invoke-MSGraphOperation -Delete -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32AppID)/assignments/$($Assignment.id)" -ErrorAction Stop
+                                Write-Verbose -Message "Successfully removed 'All Users' assignment with intent '$($AssignmentIntent)' and ID: $($Assignment.id)"
+                            }
+                            catch [System.Exception] {
+                                Write-Warning -Message "An error occurred while removing 'All Users' assignment with intent '$($AssignmentIntent)' and ID '$($Assignment.id)'. Error message: $($_.Exception.Message)"
+                            }
                         }
                     }
-
-                    # Calculate amount of remaining assignments after attempted removal process
-                    $Win32AppAssignmentResponse = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32AppID)/assignments" -ErrorAction Stop
-                    Write-Verbose -Message "Count of assignments for Win32 app after attempted removal process: $(($Win32AppAssignmentResponse | Measure-Object).Count)"
+                    else {
+                        Write-Verbose -Message "No 'All Users' assignments found for Win32 app with ID: $($Win32AppID)"
+                    }
                 }
                 else {
-                    Write-Verbose -Message "Unable to locate any instances for removal, Win32 app does not have any existing assignments"
+                    Write-Verbose -Message "Win32 app does not have any existing assignments"
                 }
             }
             catch [System.Exception] {
@@ -110,7 +116,7 @@ function Remove-IntuneWin32AppAssignment {
             }
         }
         else {
-            Write-Warning -Message "Unable to determine the Win32 app identification for assignment"
+            Write-Warning -Message "Unable to determine the Win32 app identification for assignment removal"
         }
     }
 }

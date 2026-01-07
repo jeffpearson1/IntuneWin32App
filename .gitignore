@@ -1,0 +1,27 @@
+# Test files and directories
+Tests/
+
+# PowerShell Gallery publishing artifacts
+*.nupkg
+
+# Local development files
+*.local.ps1
+*.dev.ps1
+
+# Output directories
+Output/
+Build/
+
+# Visual Studio Code settings
+.vscode/
+
+# Copilot instructions (moved to .github/instructions)
+.copilot/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Log files
+*.log
+*.txt

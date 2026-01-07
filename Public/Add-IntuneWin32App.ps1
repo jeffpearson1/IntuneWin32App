@@ -11,16 +11,16 @@ function Add-IntuneWin32App {
 
     .PARAMETER DisplayName
         Specify a display name for the Win32 application.
-    
+
     .PARAMETER Description
         Specify a description for the Win32 application.
-    
+
     .PARAMETER Publisher
         Specify a publisher name for the Win32 application.
 
     .PARAMETER AppVersion
         Specify the app version for the Win32 application.
-    
+
     .PARAMETER Developer
         Specify the developer name for the Win32 application.
 
@@ -32,10 +32,10 @@ function Add-IntuneWin32App {
 
     .PARAMETER InformationURL
         Specify the information URL for the Win32 application.
-    
+
     .PARAMETER PrivacyURL
         Specify the privacy URL for the Win32 application.
-    
+
     .PARAMETER CompanyPortalFeaturedApp
         Specify whether to have the Win32 application featured in Company Portal or not.
 
@@ -44,13 +44,13 @@ function Add-IntuneWin32App {
 
     .PARAMETER InstallCommandLine
         Specify the install command line for the Win32 application.
-    
+
     .PARAMETER UninstallCommandLine
         Specify the uninstall command line for the Win32 application.
 
     .PARAMETER InstallExperience
         Specify the install experience for the Win32 application. Supported values are: system or user.
-    
+
     .PARAMETER RestartBehavior
         Specify the restart behavior for the Win32 application. Supported values are: allow, basedOnReturnCode, suppress or force.
 
@@ -59,7 +59,7 @@ function Add-IntuneWin32App {
 
     .PARAMETER AllowAvailableUninstall
         Specify whether to allow the Win32 application to be uninstalled from the Company Portal app when assigned as available.
-    
+
     .PARAMETER DetectionRule
         Provide an array of a single or multiple OrderedDictionary objects as detection rules that will be used for the Win32 application.
 
@@ -106,7 +106,7 @@ function Add-IntuneWin32App {
         1.0.6 - (2021-08-31) Added AppVersion optional parameter
         1.0.7 - (2022-09-02) Removed break command that would prevent the Win32 app body JSON output from being display in case an error occured
         1.0.8 - (2022-10-02) Added UseAzCopy parameter switch to override the native transfer method. Specify the UseAzCopy parameter switch when uploading large applications.
-                             Added fallback removal code for the cleanup operation at the end of this function, since OneDrive's Files On Demand feature sometimes blocks the 
+                             Added fallback removal code for the cleanup operation at the end of this function, since OneDrive's Files On Demand feature sometimes blocks the
                              expanded .intunewin file cleanup process.
         1.0.9 - (2023-01-20) Added parameter AzCopyWindowStyle and ScopeTagName. Updated regex pattern for .intunewin file and parameter FilePath.
                              Added support for specifying Scope Tags when creating the Win 32 app, using the ScopeTagName parameter. Added UnattendedInstall and
@@ -114,6 +114,7 @@ function Add-IntuneWin32App {
                              Added CategoryName parameter. UseAzCopy parameter will now only be allowed if content size is 100MB or more.
         1.1.0 - (2023-03-17) Added parameter switch AllowAvailableUninstall. Fixed issue #77 related to scope tags and custom roles.
         1.1.1 - (2023-09-02) Added parameter MaximumInstallationTimeInMinutes. Updated with Test-AccessToken function.
+        1.1.2 - (2024-12-19) Added logic to make Expand folder unique to avoid file access conflicts. (tjgruber)
     #>
     [CmdletBinding(SupportsShouldProcess=$true, DefaultParameterSetName = "MSI")]
     param(
@@ -302,7 +303,7 @@ function Add-IntuneWin32App {
                     foreach ($ScopeTagItem in $ScopeTagName) {
                         # Ensure a Scope Tag exist by given name from parameter input
                         Write-Verbose -Message "Querying for specified Scope Tag: $($ScopeTagItem)"
-                        $ScopeTag = (Invoke-IntuneGraphRequest -APIVersion "Beta" -Route "deviceManagement" -Resource "getRoleScopeTagsByResource(resource='MobileApps')?`$filter=displayName eq '$($ScopeTagItem)'" -Method "GET" -ErrorAction "Stop").value
+                        $ScopeTag = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceManagement/getRoleScopeTagsByResource(resource='MobileApps')?`$filter=displayName eq '$($ScopeTagItem)'" -ErrorAction "Stop"
                         if ($ScopeTag -ne $null) {
                             Write-Verbose -Message "Found Scope Tag with display name '$($ScopeTag.displayName)' and id: $($ScopeTag.id)"
                             $ScopeTagList.Add($ScopeTag.id) | Out-Null
@@ -319,7 +320,7 @@ function Add-IntuneWin32App {
                     foreach ($CategoryNameItem in $CategoryName) {
                         # Ensure category exist by given name from parameter input
                         Write-Verbose -Message "Querying for specified Category: $($CategoryNameItem)"
-                        $Category = (Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileAppCategories?`$filter=displayName eq '$([System.Web.HttpUtility]::UrlEncode($CategoryNameItem))'" -Method "GET" -ErrorAction "Stop").value
+                        $Category = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceAppManagement/mobileAppCategories?`$filter=displayName eq '$([System.Web.HttpUtility]::UrlEncode($CategoryNameItem))'" -ErrorAction "Stop"
                         if ($Category -ne $null) {
                             $PSObject = [PSCustomObject]@{
                                 id = $Category.id
@@ -332,7 +333,7 @@ function Add-IntuneWin32App {
                         }
                     }
                 }
-                
+
                 # Generate Win32 application body data table with different parameters based upon parameter set name
                 Write-Verbose -Message "Start constructing basic layout of Win32 app body"
                 switch ($PSCmdlet.ParameterSetName) {
@@ -373,7 +374,7 @@ function Add-IntuneWin32App {
                         if (-not($PSBoundParameters["Developer"])) {
                             $Developer = [string]::Empty
                         }
-                        
+
                         # Generate Win32 application body
                         $AppBodySplat = @{
                             "MSI" = $true
@@ -479,7 +480,7 @@ function Add-IntuneWin32App {
                 if (($DetectionRule.'@odata.type' -contains "#microsoft.graph.win32LobAppPowerShellScriptDetection") -and (@($DetectionRules).'@odata.type'.Count -gt 1)) {
                     Write-Warning -Message "Multiple PowerShell Script detection rules were detected, this is not a supported configuration"; break
                 }
-               
+
                 # Add detection rules to Win32 app body object
                 Write-Verbose -Message "Detection rule objects passed validation checks, attempting to add to existing Win32 app body"
                 $Win32AppBody.Add("detectionRules", $DetectionRule)
@@ -507,7 +508,7 @@ function Add-IntuneWin32App {
 
                 # Create the Win32 app
                 Write-Verbose -Message "Attempting to create Win32 app using constructed body converted to JSON content"
-                $Win32MobileAppRequest = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps" -Method "POST" -Body ($Win32AppBody | ConvertTo-Json)
+                $Win32MobileAppRequest = Invoke-MSGraphOperation -Post -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps" -Body ($Win32AppBody | ConvertTo-Json)
                 if ($Win32MobileAppRequest.'@odata.type' -notlike "#microsoft.graph.win32LobApp") {
                     Write-Warning -Message "Failed to create Win32 app using constructed body. Passing converted body as JSON to output."
                     Write-Warning -Message ($Win32AppBody | ConvertTo-Json); break
@@ -523,14 +524,14 @@ function Add-IntuneWin32App {
                                     "@odata.id" = "https://graph.microsoft.com/beta/deviceAppManagement/mobileAppCategories/$($CategoryItem.id)"
                                 }
                                 Write-Verbose -Message "Adding '$($CategoryItem.DisplayName)' reference to Win32 app with category ID: $($CategoryItem.id)"
-                                $Win32AppCategoryReference = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($Win32MobileAppRequest.id)/categories/`$ref" -Method "POST" -Body ($CategoryBodyTable | ConvertTo-Json)
+                                $Win32AppCategoryReference = Invoke-MSGraphOperation -Post -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32MobileAppRequest.id)/categories/`$ref" -Body ($CategoryBodyTable | ConvertTo-Json)
                             }
                         }
                     }
 
                     # Create Content Version for the Win32 app
                     Write-Verbose -Message "Attempting to create contentVersions resource for the Win32 app"
-                    $Win32MobileAppContentVersionRequest = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($Win32MobileAppRequest.id)/microsoft.graph.win32LobApp/contentVersions" -Method "POST" -Body "{}"
+                    $Win32MobileAppContentVersionRequest = Invoke-MSGraphOperation -Post -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32MobileAppRequest.id)/microsoft.graph.win32LobApp/contentVersions" -Body "{}"
                     if ([string]::IsNullOrEmpty($Win32MobileAppContentVersionRequest.id)) {
                         Write-Warning -Message "Failed to create contentVersions resource for Win32 app"
                     }
@@ -538,7 +539,8 @@ function Add-IntuneWin32App {
                         Write-Verbose -Message "Successfully created contentVersions resource with ID: $($Win32MobileAppContentVersionRequest.id)"
 
                         # Extract compressed .intunewin file to subfolder
-                        $IntuneWinFilePath = Expand-IntuneWin32AppCompressedFile -FilePath $FilePath -FileName $IntuneWinXMLMetaData.ApplicationInfo.FileName -FolderName "Expand"
+                        $SubFolderName = "Expand_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 12)
+                        $IntuneWinFilePath = Expand-IntuneWin32AppCompressedFile -FilePath $FilePath -FileName $IntuneWinXMLMetaData.ApplicationInfo.FileName -FolderName $SubFolderName
                         if ($IntuneWinFilePath -ne $null) {
                             # Create a new file entry in Intune for the upload of the .intunewin file
                             Write-Verbose -Message "Constructing Win32 app content file body for uploading of .intunewin file"
@@ -553,14 +555,14 @@ function Add-IntuneWin32App {
                             }
 
                             # Create the contentVersions files resource
-                            $Win32MobileAppFileContentRequest = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($Win32MobileAppRequest.id)/microsoft.graph.win32LobApp/contentVersions/$($Win32MobileAppContentVersionRequest.id)/files" -Method "POST" -Body ($Win32AppFileBody | ConvertTo-Json)
+                            $Win32MobileAppFileContentRequest = Invoke-MSGraphOperation -Post -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32MobileAppRequest.id)/microsoft.graph.win32LobApp/contentVersions/$($Win32MobileAppContentVersionRequest.id)/files" -Body ($Win32AppFileBody | ConvertTo-Json)
                             if ([string]::IsNullOrEmpty($Win32MobileAppFileContentRequest.id)) {
                                 Write-Warning -Message "Failed to create Azure Storage blob for contentVersions/files resource for Win32 app"
                             }
                             else {
                                 # Wait for the Win32 app file content URI to be created
                                 Write-Verbose -Message "Waiting for Intune service to process contentVersions/files request"
-                                $FilesUri = "mobileApps/$($Win32MobileAppRequest.id)/microsoft.graph.win32LobApp/contentVersions/$($Win32MobileAppContentVersionRequest.id)/files/$($Win32MobileAppFileContentRequest.id)"
+                                $FilesUri = "deviceAppManagement/mobileApps/$($Win32MobileAppRequest.id)/microsoft.graph.win32LobApp/contentVersions/$($Win32MobileAppContentVersionRequest.id)/files/$($Win32MobileAppFileContentRequest.id)"
                                 $ContentVersionsFiles = Wait-IntuneWin32AppFileProcessing -Stage "AzureStorageUriRequest" -Resource $FilesUri
 
                                 # Upload .intunewin file to Azure Storage blob
@@ -610,7 +612,7 @@ function Add-IntuneWin32App {
 
                                 # Create file commit request
                                 $CommitResource = "mobileApps/$($Win32MobileAppRequest.id)/microsoft.graph.win32LobApp/contentVersions/$($Win32MobileAppContentVersionRequest.id)/files/$($Win32MobileAppFileContentRequest.id)/commit"
-                                $Win32AppFileCommitRequest = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource $CommitResource -Method "POST" -Body ($IntuneWinFileEncryptionInfo | ConvertTo-Json)
+                                $Win32AppFileCommitRequest = Invoke-MSGraphOperation -Post -APIVersion "Beta" -Resource "deviceAppManagement/$($CommitResource)" -Body ($IntuneWinFileEncryptionInfo | ConvertTo-Json)
 
                                 # Wait for Intune service to process the commit file request
                                 Write-Verbose -Message "Waiting for Intune service to process the commit file request"
@@ -630,14 +632,14 @@ function Add-IntuneWin32App {
                                             "@odata.type" = "#microsoft.graph.win32LobApp"
                                             "committedContentVersion" = $Win32MobileAppContentVersionRequest.id
                                         }
-                                        $Win32AppFileCommitBodyRequest = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($Win32MobileAppRequest.id)" -Method "PATCH" -Body ($Win32AppFileCommitBody | ConvertTo-Json)
+                                        $Win32AppFileCommitBodyRequest = Invoke-MSGraphOperation -Patch -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32MobileAppRequest.id)" -Body ($Win32AppFileCommitBody | ConvertTo-Json)
 
                                         # Handle return output
                                         Write-Verbose -Message "Successfully created Win32 app and committed file content to Azure Storage blob"
-                                        $Win32MobileAppRequest = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($Win32MobileAppRequest.id)" -Method "GET"
+                                        $Win32MobileAppRequest = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($Win32MobileAppRequest.id)"
                                         Write-Output -InputObject $Win32MobileAppRequest
                                     }
-                                }                                
+                                }
                             }
 
                             try {

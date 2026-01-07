@@ -38,7 +38,7 @@ function Test-IntuneWin32AppAssignment {
 
         try {
             Write-Verbose -Message "Retrieving any existing Win32 app assignments to validate existing assignments for duplicate resources"
-            $Win32AppAssignments = Invoke-IntuneGraphRequest -APIVersion "Beta" -Resource "mobileApps/$($ID)/assignments" -Method "GET" -ErrorAction Stop
+            $Win32AppAssignments = Invoke-MSGraphOperation -Get -APIVersion "Beta" -Resource "deviceAppManagement/mobileApps/$($ID)/assignments" -ErrorAction Stop
             $Win32AppAssignmentsCount = ($Win32AppAssignments.value | Measure-Object).Count
             if ($Win32AppAssignmentsCount -ge 1) {
                 Write-Verbose -Message "Detected count of '$($Win32AppAssignmentsCount)' existing assignments, processing each item for validation"
@@ -57,7 +57,7 @@ function Test-IntuneWin32AppAssignment {
                 switch ($Target) {
                     "Group" {
                         foreach ($Win32AppAssignment in $Win32AppAssignments.value) {
-                            if ($Win32AppAssignment.target.'@odata.type' -match "groupAssignmentTarget") {
+                            if ($Win32AppAssignment.target.'@odata.type' -eq "#microsoft.graph.groupAssignmentTarget") {
                                 if ($Win32AppAssignment.target.groupId -like $GroupID) {
                                     Write-Warning -Message "Win32 app assignment with id '$($Win32AppAssignment.id)' of target type '$($Target)' and GroupID '$($Win32AppAssignment.target.groupId)' already exists, duplicate assignments of this type is not permitted"
                                     $DuplicateAssignmentDetected = $true
